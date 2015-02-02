@@ -1,6 +1,7 @@
 #coding: utf-8
 
 import signal
+import collections
 import multiprocessing
 
 def _init_pool():
@@ -8,29 +9,25 @@ def _init_pool():
 
     return
 
-def _make_args(runnable, args):
-    return zip((runnable, )*len(args), args)
-
-def _make_worker(args):
-    runnable, wargs = args
-    w = Worker(runnable, wargs, multi=False)
-    return w
+def run_worker(runnable, args, channel, multi=True):
+    return Worker(runnable, args, channel=channel, multi=multi)._run()
 
 class Worker(object):
-    def __init__(self, runnable=None, args=(), multi=True):
+    def __init__(self, runnable=None, args=(), channel=None, multi=True):
         self.runnable = runnable
         self.args = args
         self.multi = multi
+        self.channel = channel
 
         return
 
-    def _run(self, channel):
-        channel.put('completed')
-
+    def _run(self):
         if self.multi:
             self.runnable(*self.args)
         else:
             self.runnable(self.args)
+
+        self.channel.put('completed')
 
         return
 
@@ -38,12 +35,14 @@ class MultiprocessPool(object):
     def __init__(self, nProcess=None):
         self.nProcess = multiprocessing.cpu_count()*2 if nProcess is None else nProcess
         self.running = False
+        m = multiprocessing.Manager()
+        q = m.Queue()
+        self.channel = q
 
         return
 
     def __enter__(self):
         self.pool = multiprocessing.Pool(self.nProcess, _init_pool)
-        self.channel = multiprocessing.Queue()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -70,22 +69,22 @@ class MultiprocessPool(object):
     def map(self, runnable, args):
         if self.is_running():return
         assert len(args) > 0
+        assert isinstance(args, collections.Iterable)
 
-        workers = map(_make_worker, _make_args(runnable, args))
-        self.nProcess = len(workers)
+        self.nProcess = len(args)
 
-        for worker in workers:
-            self.pool.apply_async(worker._run(self.channel))
+        for arg in args:
+            self.pool.apply_async(run_worker, args=(runnable, arg, self.channel, False, ))
 
         self._run()
 
         return
 
-    def run(self, runnable, args=()):
+    def run(self, runnable, args=(), q=None):
         if self.is_running():return
 
         for i in range(self.nProcess):
-            self.pool.apply_async(Worker(runnable, args)._run(self.channel))
+            self.pool.apply_async(run_worker, args=(runnable, args, self.channel, ))
 
         self._run()
 
@@ -94,20 +93,22 @@ class MultiprocessPool(object):
 
 if __name__ == '__main__':
     import time
-    def test_run():
-        print 'testing run function .....'
+    import os
+
+    def test_run(x):
+        print 'testing run function .....', x, os.getpid()
         time.sleep(1)
 
         return
 
     with MultiprocessPool(2) as mp:
-        mp.run(test_run)
+        mp.run(test_run, (2, ))
 
     def test_map(x):
-        print 'testing map function .....', x
+        print 'testing map function .....', x, os.getpid()
         time.sleep(1)
 
         return
 
-    with MultiprocessPool() as mp:
+    with MultiprocessPool(3) as mp:
         mp.map(test_map, [1, 2, 3])
