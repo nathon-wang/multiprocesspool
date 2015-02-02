@@ -46,8 +46,11 @@ class MultiprocessPool(object):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.pool.close()
-        self.pool.join()
+        try:
+            self.pool.close()
+            self.pool.join()
+        except:
+            pass
         return
 
     def is_running(self):
@@ -57,12 +60,16 @@ class MultiprocessPool(object):
         self.running = True
         completed = 0
 
-        while True:
-            msg = self.channel.get()
-            if msg == 'completed':
-                completed += 1
-            if completed >= self.nProcess:
-                break
+        try:
+            while True:
+                msg = self.channel.get()
+                if msg == 'completed':
+                    completed += 1
+                if completed >= self.nProcess:
+                    break
+        except KeyboardInterrupt:
+            print 'KeyboardInterrupt be Caught!!!'
+            self.pool.terminate()
 
         return
 
@@ -96,8 +103,9 @@ if __name__ == '__main__':
     import os
 
     def test_run(x):
-        print 'testing run function .....', x, os.getpid()
-        time.sleep(1)
+        while True:
+            print 'testing run function .....', x, os.getpid()
+            time.sleep(1)
 
         return
 
